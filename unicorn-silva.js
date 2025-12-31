@@ -68,9 +68,22 @@ const {
 } = baileysModule
 
 // Try to get makeInMemoryStore from various sources
-let makeInMemoryStoreFn = baileysModule.makeInMemoryStore || 
-                          baileys.makeInMemoryStore || 
-                          null
+let makeInMemoryStoreFn = null
+
+// Check if makeInMemoryStore exists in the imported module
+if (baileysModule.makeInMemoryStore) {
+    makeInMemoryStoreFn = baileysModule.makeInMemoryStore
+} else if (baileys.makeInMemoryStore) {
+    makeInMemoryStoreFn = baileys.makeInMemoryStore
+} else {
+    // Try to import it separately if not found
+    try {
+        const { makeInMemoryStore } = await import('@whiskeysockets/baileys')
+        makeInMemoryStoreFn = makeInMemoryStore
+    } catch (e) {
+        console.warn('makeInMemoryStore not found, store functionality disabled')
+    }
+}
 
 import readline from 'readline'
 
@@ -220,12 +233,25 @@ const MAIN_LOGGER = pino({ timestamp: () => `,"time":"${new Date().toJSON()}"` }
 const logger = MAIN_LOGGER.child({})
 logger.level = 'fatal'
 
-const store = useStore ? makeInMemoryStoreFn({ logger }) : undefined
-store?.readFromFile('./session.json')
+// Initialize store safely
+let store = undefined
+let storeInterval = null
 
-let storeInterval = setInterval(() => {
-  store?.writeToFile('./session.json')
-}, 10000 * 6)
+if (useStore && makeInMemoryStoreFn) {
+    try {
+        store = makeInMemoryStoreFn({ logger })
+        store?.readFromFile('./session.json')
+        
+        storeInterval = setInterval(() => {
+            store?.writeToFile('./session.json')
+        }, 10000 * 6)
+    } catch (error) {
+        console.warn('Failed to initialize store:', error.message)
+        store = undefined
+    }
+} else if (useStore) {
+    console.warn('Store functionality disabled - makeInMemoryStore not available')
+}
 
 const msgRetryCounterCache = new NodeCache()
 
@@ -332,7 +358,7 @@ const connectionOptions = {
   generateHighQualityLinkPreview: true,
   getMessage: async key => {
     let jid = jidNormalizedUser(key.remoteJid)
-    let msg = await store.loadMessage(jid, key.id)
+    let msg = await store?.loadMessage(jid, key.id)
     return msg?.message || ''
   },
   patchMessageBeforeSending: message => {
@@ -363,7 +389,9 @@ const connectionOptions = {
 
 global.conn = makeWASocket(connectionOptions)
 conn.isInit = false
-store?.bind(conn.ev)
+if (store && typeof store.bind === 'function') {
+  store.bind(conn.ev)
+}
 
 if (pairingCode && !conn.authState.creds.registered) {
   let phoneNumber
@@ -691,7 +719,7 @@ async function _quickTest() {
     [
       spawn('ffmpeg'),
       spawn('ffprobe'),
-      spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-filter_complex', 'color', '-frames:v', '1', '-f', 'webp', '-']),
+      spawn('ffmpeg', ['-hidebanner', '-loglevel', 'error', '-filter_complex', 'color', '-frames:v', '1', '-f', 'webp', '-']),
       spawn('convert'),
       spawn('magick'),
       spawn('gm'),
