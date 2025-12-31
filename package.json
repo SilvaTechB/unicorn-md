@@ -47,7 +47,7 @@
         "@shineiichijo/marika": "^2.0.6",
         "@StarlightsTeam/Scraper": "github:StarlightsTeam/StarlightsTeam-Scraper",
         "@vitalets/google-translate-api": "^9.2.0",
-        "@whiskeysockets/baileys": "^6.7.9",
+        "@whiskeysockets/baileys": "^6.7.21",
         "@SumiFX/Scraper": "github:SumiFX/SumiFX-Scraper",
         "@hapi/boom": "^10.0.0",
         "@xct007/frieren-scraper": "*",
