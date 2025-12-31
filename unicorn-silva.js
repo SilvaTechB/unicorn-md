@@ -51,10 +51,22 @@ import { format } from 'util'
 import yargs from 'yargs'
 import { makeWASocket, protoType, serialize } from './lib/simple.js'
 
-const baileys = await import('@whiskeysockets/baileys')
+// Try to import baileys with better error handling
+let baileys
+let baileysModule
+try {
+  console.log('🔧 Attempting to load @whiskeysockets/baileys...')
+  baileys = await import('@whiskeysockets/baileys')
+  baileysModule = baileys.default || baileys
+  console.log('✅ @whiskeysockets/baileys loaded successfully')
+} catch (error) {
+  console.error('❌ Failed to load @whiskeysockets/baileys:', error.message)
+  console.error('💡 Please install it: npm install @whiskeysockets/baileys')
+  console.error('💡 If deploying on Heroku, add it to package.json dependencies')
+  process.exit(1)
+}
 
-// Handle both default and named exports
-const baileysModule = baileys.default || baileys
+// Extract baileys components with fallbacks
 const {
   DisconnectReason,
   useMultiFileAuthState,
@@ -70,19 +82,12 @@ const {
 // Try to get makeInMemoryStore from various sources
 let makeInMemoryStoreFn = null
 
-// Check if makeInMemoryStore exists in the imported module
 if (baileysModule.makeInMemoryStore) {
     makeInMemoryStoreFn = baileysModule.makeInMemoryStore
 } else if (baileys.makeInMemoryStore) {
     makeInMemoryStoreFn = baileys.makeInMemoryStore
 } else {
-    // Try to import it separately if not found
-    try {
-        const { makeInMemoryStore } = await import('@whiskeysockets/baileys')
-        makeInMemoryStoreFn = makeInMemoryStore
-    } catch (e) {
-        console.warn('makeInMemoryStore not found, store functionality disabled')
-    }
+    console.warn('⚠️ makeInMemoryStore not found, store functionality disabled')
 }
 
 import readline from 'readline'
@@ -265,6 +270,7 @@ const { CONNECTING } = ws
 const { chain } = lodash
 const PORT = process.env.PORT || process.env.SERVER_PORT || 3000
 
+// Call protoType and serialize from simple.js
 protoType()
 serialize()
 
@@ -335,6 +341,15 @@ global.loadDatabase = async function loadDatabase() {
 loadDatabase()
 
 global.authFolder = `session`
+
+// Check if useMultiFileAuthState exists
+if (!useMultiFileAuthState || typeof useMultiFileAuthState !== 'function') {
+  console.error('❌ useMultiFileAuthState is not a function or not found')
+  console.error('💡 This might be due to baileys version incompatibility')
+  console.error('💡 Try: npm install @whiskeysockets/baileys@latest')
+  process.exit(1)
+}
+
 const { state, saveCreds } = await useMultiFileAuthState(global.authFolder)
 
 const connectionOptions = {
