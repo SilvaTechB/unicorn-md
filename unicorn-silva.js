@@ -165,8 +165,6 @@ async function main() {
 
 main()
 
-await delay(1000 * 10)
-
 // ============================== 
 // 🔐 AUTHOR VERIFICATION 
 // ============================== 
