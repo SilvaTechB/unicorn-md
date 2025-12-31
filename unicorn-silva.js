@@ -61,15 +61,16 @@ const {
   MessageRetryMap,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
-  makeInMemoryStore,
   proto,
   delay,
   jidNormalizedUser,
   PHONENUMBER_MCC,
 } = baileysModule
 
-// Fallback for makeInMemoryStore if not in default export
-const makeInMemoryStoreFn = makeInMemoryStore || baileys.makeInMemoryStore
+// Try to get makeInMemoryStore from various sources
+let makeInMemoryStoreFn = baileysModule.makeInMemoryStore || 
+                          baileys.makeInMemoryStore || 
+                          null
 
 import readline from 'readline'
 
