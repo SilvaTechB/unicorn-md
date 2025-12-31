@@ -51,6 +51,10 @@ import { format } from 'util'
 import yargs from 'yargs'
 import { makeWASocket, protoType, serialize } from './lib/simple.js'
 
+const baileys = await import('@whiskeysockets/baileys')
+
+// Handle both default and named exports
+const baileysModule = baileys.default || baileys
 const {
   DisconnectReason,
   useMultiFileAuthState,
@@ -62,9 +66,10 @@ const {
   delay,
   jidNormalizedUser,
   PHONENUMBER_MCC,
-} = await (
-  await import('@whiskeysockets/baileys')
-).default
+} = baileysModule
+
+// Fallback for makeInMemoryStore if not in default export
+const makeInMemoryStoreFn = makeInMemoryStore || baileys.makeInMemoryStore
 
 import readline from 'readline'
 
@@ -214,7 +219,7 @@ const MAIN_LOGGER = pino({ timestamp: () => `,"time":"${new Date().toJSON()}"` }
 const logger = MAIN_LOGGER.child({})
 logger.level = 'fatal'
 
-const store = useStore ? makeInMemoryStore({ logger }) : undefined
+const store = useStore ? makeInMemoryStoreFn({ logger }) : undefined
 store?.readFromFile('./session.json')
 
 let storeInterval = setInterval(() => {
