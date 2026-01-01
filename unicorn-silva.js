@@ -1,13 +1,11 @@
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1'
 
-// Suppress punycode deprecation warning (caused by @whiskeysockets/baileys dependencies)
+// Suppress punycode deprecation warning
 process.removeAllListeners('warning')
 process.on('warning', (warning) => {
-  // Ignore punycode deprecation - it's from a dependency, not our code
   if (warning.name === 'DeprecationWarning' && warning.message.includes('punycode')) {
     return
   }
-  // Show other warnings
   console.warn(warning.name + ':', warning.message)
 })
 
@@ -24,7 +22,6 @@ import zlib from 'zlib'
 import { EventEmitter } from 'events'
 import clearTmp from './lib/tempclear.js'
 
-// Increase EventEmitter limit to prevent warnings
 EventEmitter.defaultMaxListeners = 20
 
 global.__filename = function filename(pathURL = import.meta.url, rmPrefix = platform !== 'win32') {
@@ -51,43 +48,79 @@ import { format } from 'util'
 import yargs from 'yargs'
 import { makeWASocket, protoType, serialize } from './lib/simple.js'
 
-// Try to import baileys with better error handling
+// ========================================
+// ROBUST BAILEYS IMPORT
+// ========================================
+console.log('🔧 Loading @whiskeysockets/baileys...')
+
 let baileys
-let baileysModule
 try {
-  console.log('🔧 Attempting to load @whiskeysockets/baileys...')
   baileys = await import('@whiskeysockets/baileys')
-  baileysModule = baileys.default || baileys
-  console.log('✅ @whiskeysockets/baileys loaded successfully')
+  console.log('✅ Baileys module loaded')
 } catch (error) {
   console.error('❌ Failed to load @whiskeysockets/baileys:', error.message)
-  console.error('💡 Please install it: npm install @whiskeysockets/baileys')
-  console.error('💡 If deploying on Heroku, add it to package.json dependencies')
+  console.error('💡 Run: npm install @whiskeysockets/baileys@6.7.7')
   process.exit(1)
 }
 
-// Extract baileys components with fallbacks
-const {
-  DisconnectReason,
-  useMultiFileAuthState,
-  MessageRetryMap,
-  fetchLatestWaWebVersion,
-  makeCacheableSignalKeyStore,
-  proto,
-  delay,
-  jidNormalizedUser,
-  PHONENUMBER_MCC,
-} = baileysModule
+// Extract components with multiple fallback strategies
+let DisconnectReason, useMultiFileAuthState, MessageRetryMap, fetchLatestWaWebVersion
+let makeCacheableSignalKeyStore, proto, delay, jidNormalizedUser, PHONENUMBER_MCC, makeInMemoryStore
 
-// Try to get makeInMemoryStore from various sources
-let makeInMemoryStoreFn = null
+// Strategy 1: Try named exports directly
+DisconnectReason = baileys.DisconnectReason
+useMultiFileAuthState = baileys.useMultiFileAuthState
+MessageRetryMap = baileys.MessageRetryMap
+fetchLatestWaWebVersion = baileys.fetchLatestWaWebVersion
+makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore
+proto = baileys.proto
+delay = baileys.delay
+jidNormalizedUser = baileys.jidNormalizedUser
+PHONENUMBER_MCC = baileys.PHONENUMBER_MCC
+makeInMemoryStore = baileys.makeInMemoryStore
 
-if (baileysModule.makeInMemoryStore) {
-    makeInMemoryStoreFn = baileysModule.makeInMemoryStore
-} else if (baileys.makeInMemoryStore) {
-    makeInMemoryStoreFn = baileys.makeInMemoryStore
-} else {
-    console.warn('⚠️ makeInMemoryStore not found, store functionality disabled')
+// Strategy 2: Try default export if direct access failed
+if (!useMultiFileAuthState && baileys.default) {
+  console.log('📦 Trying default export...')
+  DisconnectReason = baileys.default.DisconnectReason
+  useMultiFileAuthState = baileys.default.useMultiFileAuthState
+  MessageRetryMap = baileys.default.MessageRetryMap
+  fetchLatestWaWebVersion = baileys.default.fetchLatestWaWebVersion
+  makeCacheableSignalKeyStore = baileys.default.makeCacheableSignalKeyStore
+  proto = baileys.default.proto
+  delay = baileys.default.delay
+  jidNormalizedUser = baileys.default.jidNormalizedUser
+  PHONENUMBER_MCC = baileys.default.PHONENUMBER_MCC
+  makeInMemoryStore = baileys.default.makeInMemoryStore
+}
+
+// Verify critical components
+if (!useMultiFileAuthState || typeof useMultiFileAuthState !== 'function') {
+  console.error('❌ CRITICAL: useMultiFileAuthState not found')
+  console.error('📋 Available exports:', Object.keys(baileys).slice(0, 20).join(', '))
+  if (baileys.default) {
+    console.error('📋 Default exports:', Object.keys(baileys.default).slice(0, 20).join(', '))
+  }
+  console.error('💡 Solution:')
+  console.error('   1. Remove node_modules: rm -rf node_modules package-lock.json')
+  console.error('   2. Install: npm install @whiskeysockets/baileys@6.7.7')
+  console.error('   3. Verify: npm list @whiskeysockets/baileys')
+  process.exit(1)
+}
+
+if (!DisconnectReason) {
+  console.error('❌ CRITICAL: DisconnectReason not found')
+  process.exit(1)
+}
+
+if (!proto) {
+  console.error('❌ CRITICAL: proto not found')
+  process.exit(1)
+}
+
+console.log('✅ All critical Baileys components loaded')
+if (!makeInMemoryStore) {
+  console.warn('⚠️ makeInMemoryStore not available (store disabled)')
 }
 
 import readline from 'readline'
@@ -95,7 +128,7 @@ import readline from 'readline'
 dotenv.config()
 
 // ============================== 
-// 🔐 SESSION MANAGEMENT 
+// SESSION MANAGEMENT 
 // ============================== 
 const botLogger = {
   log: (type, message) => {
@@ -112,7 +145,6 @@ async function loadSession() {
       mkdirSync('./session', { recursive: true })
     }
     
-    // Clean old sessions if needed
     if (existsSync(credsPath)) {
       try {
         const credsData = JSON.parse(readFileSync(credsPath, 'utf8'))
@@ -127,14 +159,12 @@ async function loadSession() {
         try {
           unlinkSync(credsPath)
           botLogger.log('INFO', "♻️ Corrupted session removed")
-        } catch (err) {
-          // Ignore error
-        }
+        } catch (err) {}
       }
     }
     
     if (!process.env.SESSION_ID || typeof process.env.SESSION_ID !== 'string') {
-      botLogger.log('WARNING', "⚠️ SESSION_ID missing, using QR")
+      botLogger.log('WARNING', "⚠️ SESSION_ID missing")
       return false
     }
     
@@ -148,39 +178,34 @@ async function loadSession() {
     const compressedData = Buffer.from(cleanB64, 'base64')
     const decompressedData = zlib.gunzipSync(compressedData)
     
-    // Validate JSON
     const jsonData = JSON.parse(decompressedData.toString('utf8'))
     if (!jsonData.me || !jsonData.me.id) {
-      botLogger.log('ERROR', "❌ Session data is invalid (missing 'me' field)")
+      botLogger.log('ERROR', "❌ Session data invalid")
       return false
     }
     
     writeFileSync(credsPath, decompressedData, "utf8")
-    botLogger.log('SUCCESS', "✅ Session loaded successfully")
+    botLogger.log('SUCCESS', "✅ Session loaded")
     return true
   } catch (e) {
     botLogger.log('ERROR', "❌ Session Error: " + e.message)
-    botLogger.log('ERROR', "💡 Please generate a NEW session ID")
     return false
   }
 }
 
 async function main() {
-  const txt = process.env.SESSION_ID
-
-  if (!txt) {
-    console.error('❌ SESSION_ID environment variable not found.')
-    console.error('💡 Set SESSION_ID in your environment variables')
+  if (!process.env.SESSION_ID) {
+    console.error('❌ SESSION_ID not found')
     return
   }
 
   try {
     const loaded = await loadSession()
     if (!loaded) {
-      console.error('❌ Failed to load session. Please check SESSION_ID format.')
+      console.error('❌ Failed to load session')
       process.exit(1)
     }
-    console.log('✅ Session loading completed.')
+    console.log('✅ Session ready')
   } catch (error) {
     console.error('❌ Error:', error.message)
     process.exit(1)
@@ -190,7 +215,7 @@ async function main() {
 main()
 
 // ============================== 
-// 🔐 AUTHOR VERIFICATION 
+// AUTHOR VERIFICATION 
 // ============================== 
 async function verifyAuthor() {
   try {
@@ -199,31 +224,20 @@ async function verifyAuthor() {
     const authorName = packageData.author && packageData.author.name
 
     if (!authorName) {
-      console.log(chalk.red('❌ Author information missing in package.json'))
+      console.log(chalk.red('❌ Author information missing'))
       process.exit(1)
     }
 
     const expectedAuthor = Buffer.from('c2lsdmE=', 'base64').toString()
-    const unauthorizedMessage = Buffer.from(
-      'VW5hdXRob3JpemVkIGNvcHkgb2YgVW5pY29ybiBNRCBkZXRlY3RlZC4gUGxlYXNlIHVzZSB0aGUgb2ZmaWNpYWwgdmVyc2lvbiBmcm9tIFNpbHZhIFRlY2ggSW5jLg==',
-      'base64'
-    ).toString()
-    const authorizedMessage = Buffer.from(
-      'U2VjdXJpdHkgY2hlY2sgcGFzc2VkIC0gVW5pY29ybiBNRCBieSBTaWx2YSBUZWNoIEluYw==',
-      'base64'
-    ).toString()
-
-    if (authorName && authorName.trim().toLowerCase() !== expectedAuthor.toLowerCase()) {
-      console.log(chalk.red('\n' + '='.repeat(60)))
-      console.log(chalk.red(unauthorizedMessage))
-      console.log(chalk.red('='.repeat(60) + '\n'))
+    if (authorName.trim().toLowerCase() !== expectedAuthor.toLowerCase()) {
+      console.log(chalk.red('❌ Unauthorized copy detected'))
       process.exit(1)
-    } else {
-      console.log(chalk.green('\n✅ ' + authorizedMessage))
-      console.log(chalk.bgBlack(chalk.cyan('🦄 Starting Unicorn MD Bot...\n')))
     }
+    
+    console.log(chalk.green('✅ Security check passed - Unicorn MD by Silva Tech Inc'))
+    console.log(chalk.bgBlack(chalk.cyan('🦄 Starting Unicorn MD Bot...\n')))
   } catch (error) {
-    console.error(chalk.red('Error during author verification:'), error)
+    console.error(chalk.red('Error during verification:'), error)
     process.exit(1)
   }
 }
@@ -238,24 +252,22 @@ const MAIN_LOGGER = pino({ timestamp: () => `,"time":"${new Date().toJSON()}"` }
 const logger = MAIN_LOGGER.child({})
 logger.level = 'fatal'
 
-// Initialize store safely
 let store = undefined
 let storeInterval = null
 
-if (useStore && makeInMemoryStoreFn) {
+if (useStore && makeInMemoryStore) {
     try {
-        store = makeInMemoryStoreFn({ logger })
+        store = makeInMemoryStore({ logger })
         store?.readFromFile('./session.json')
-        
         storeInterval = setInterval(() => {
             store?.writeToFile('./session.json')
-        }, 10000 * 6)
+        }, 60000)
     } catch (error) {
-        console.warn('Failed to initialize store:', error.message)
+        console.warn('Store init failed:', error.message)
         store = undefined
     }
 } else if (useStore) {
-    console.warn('Store functionality disabled - makeInMemoryStore not available')
+    console.warn('Store disabled - makeInMemoryStore unavailable')
 }
 
 const msgRetryCounterCache = new NodeCache()
@@ -270,7 +282,6 @@ const { CONNECTING } = ws
 const { chain } = lodash
 const PORT = process.env.PORT || process.env.SERVER_PORT || 3000
 
-// Call protoType and serialize from simple.js
 protoType()
 serialize()
 
@@ -291,9 +302,7 @@ global.API = (name, path = '/', query = {}, apikeyqueryname) =>
       )
     : '')
 
-global.timestamp = {
-  start: new Date(),
-}
+global.timestamp = { start: new Date() }
 
 const __dirname = global.__dirname(import.meta.url)
 global.opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse())
@@ -306,9 +315,6 @@ global.prefix = new RegExp(
     ']'
 )
 
-// ============================== 
-// 🗄️ SIMPLIFIED IN-MEMORY DATABASE
-// ============================== 
 global.db = {
   data: {
     users: {},
@@ -320,14 +326,8 @@ global.db = {
   },
   chain: null,
   READ: false,
-  write: async function() {
-    // Optional: implement file-based persistence if needed
-    return Promise.resolve()
-  },
-  read: async function() {
-    // Optional: implement file-based persistence if needed
-    return Promise.resolve()
-  }
+  write: async function() { return Promise.resolve() },
+  read: async function() { return Promise.resolve() }
 }
 
 global.db.chain = chain(global.db.data)
@@ -342,32 +342,16 @@ loadDatabase()
 
 global.authFolder = `session`
 
-// Check if useMultiFileAuthState exists
-if (!useMultiFileAuthState || typeof useMultiFileAuthState !== 'function') {
-  console.error('❌ useMultiFileAuthState is not a function or not found')
-  console.error('💡 This might be due to baileys version incompatibility')
-  console.error('💡 Try: npm install @whiskeysockets/baileys@latest')
-  process.exit(1)
-}
-
 const { state, saveCreds } = await useMultiFileAuthState(global.authFolder)
 
 const connectionOptions = {
   version: [2, 3000, 1015901307],
-  logger: Pino({
-    level: 'fatal',
-  }),
+  logger: Pino({ level: 'fatal' }),
   printQRInTerminal: !pairingCode,
   browser: ['chrome (linux)', '', ''],
   auth: {
     creds: state.creds,
-    keys: makeCacheableSignalKeyStore(
-      state.keys,
-      Pino().child({
-        level: 'fatal',
-        stream: 'store',
-      })
-    ),
+    keys: makeCacheableSignalKeyStore(state.keys, Pino().child({ level: 'fatal', stream: 'store' })),
   },
   markOnlineOnConnect: true,
   generateHighQualityLinkPreview: true,
@@ -412,27 +396,16 @@ if (pairingCode && !conn.authState.creds.registered) {
   let phoneNumber
   if (!!global.pairingNumber) {
     phoneNumber = global.pairingNumber.replace(/[^0-9]/g, '')
-
     if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-      console.log(
-        chalk.bgBlack(chalk.redBright("Start with your country's WhatsApp code, Example : 254xxx"))
-      )
+      console.log(chalk.bgBlack(chalk.redBright("Start with country code, Example: 254xxx")))
       process.exit(0)
     }
   } else {
-    phoneNumber = await question(
-      chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number : `))
-    )
+    phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`WhatsApp number: `)))
     phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-
     if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-      console.log(
-        chalk.bgBlack(chalk.redBright("Start with your country's WhatsApp code, Example : 254xxx"))
-      )
-
-      phoneNumber = await question(
-        chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number : `))
-      )
+      console.log(chalk.bgBlack(chalk.redBright("Start with country code, Example: 254xxx")))
+      phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`WhatsApp number: `)))
       phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
       rl.close()
     }
@@ -441,27 +414,21 @@ if (pairingCode && !conn.authState.creds.registered) {
   setTimeout(async () => {
     let code = await conn.requestPairingCode(phoneNumber)
     code = code?.match(/.{1,4}/g)?.join('-') || code
-    const pairingCode =
-      chalk.bold.greenBright('Your Pairing Code:') + ' ' + chalk.bgGreenBright(chalk.black(code))
-    console.log(pairingCode)
+    console.log(chalk.bold.greenBright('Pairing Code: ') + chalk.bgGreenBright(chalk.black(code)))
   }, 3000)
 }
 
-conn.logger.info('\n🦄 Unicorn is waiting for Login\n')
+conn.logger.info('\n🦄 Waiting for login...\n')
 
-if (opts['server']) (await import('./server.js')).default(global.conn, PORT)
+if (global.opts['server']) (await import('./server.js')).default(global.conn, PORT)
 
 let cleanupTimeout
 function runCleanup() {
   clearTmp()
-    .then(() => {
-      console.log('✅ Unicorn Temporary file cleanup completed.')
-    })
-    .catch(error => {
-      console.error('⚠️ Cleanup error:', error.message)
-    })
+    .then(() => console.log('✅ Temp cleanup done'))
+    .catch(error => console.error('⚠️ Cleanup error:', error.message))
     .finally(() => {
-      cleanupTimeout = setTimeout(runCleanup, 1000 * 60 * 2)
+      cleanupTimeout = setTimeout(runCleanup, 120000)
     })
 }
 
@@ -471,15 +438,10 @@ function clearsession() {
   try {
     const directorio = readdirSync('./session')
     const filesFolderPreKeys = directorio.filter(file => file.startsWith('pre-key-'))
-    filesFolderPreKeys.forEach(files => {
-      unlinkSync(`./session/${files}`)
-    })
-  } catch (error) {
-    // Ignore errors during cleanup
-  }
+    filesFolderPreKeys.forEach(files => unlinkSync(`./session/${files}`))
+  } catch (error) {}
 }
 
-// Track reconnection attempts
 let reconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 5
 let reconnectTimeout = null
@@ -496,51 +458,42 @@ async function connectionUpdate(update) {
   const reason = lastDisconnect?.error?.message || 'Unknown'
 
   if (!pairingCode && useQr && qr !== 0 && qr !== undefined) {
-    conn.logger.info(chalk.yellow('🔐 QR Code ready for scanning...'))
+    conn.logger.info(chalk.yellow('🔐 QR ready'))
   }
 
   if (connection === 'open') {
     reconnectAttempts = 0
     const { jid, name } = conn.user
-    const msg = `🦄 *Unicorn MD is Live!*\n\nHello ${name}, am Unicorn thank you for summoning me✅\n\n> THIS IS A SILVA TECH INC BOT\n\n📅 Launched: 1st May 2025\n🔧 Org: Silva Tech Inc.\n\n📢 Updates:\nhttps://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v\n\n— Sylivanus Momanyi`
+    const msg = `🦄 *Unicorn MD is Live!*\n\nHello ${name}! ✅\n\n📅 Jan 2026\n🔧 Silva Tech Inc.\n\n📢 Updates:\nhttps://whatsapp.com/channel/0029VaAkETLLY6d8qhLmZt2v`
 
     try {
       await conn.sendMessage(jid, { text: msg, mentions: [jid] }, { quoted: null })
-      conn.logger.info(chalk.green('\n✅ UNICORN 🦄 IS ONLINE AND READY!\n'))
+      conn.logger.info(chalk.green('\n✅ UNICORN 🦄 ONLINE!\n'))
     } catch (error) {
-      conn.logger.error('Error sending welcome message:', error.message)
+      conn.logger.error('Welcome msg error:', error.message)
     }
   }
 
   if (connection === 'close') {
-    console.log(chalk.yellow(`\n⚠️ Connection closed. Code: ${code}, Reason: ${reason}`))
+    console.log(chalk.yellow(`\n⚠️ Closed. Code: ${code}, Reason: ${reason}`))
     
-    // Handle different disconnect reasons
     if (code === DisconnectReason.loggedOut) {
-      console.error(chalk.red('\n❌ DEVICE LOGGED OUT!'))
-      console.error(chalk.red('📱 Go to WhatsApp → Linked Devices → Remove this bot'))
-      console.error(chalk.red('🔑 Generate a COMPLETELY NEW session ID'))
-      console.error(chalk.red('⚠️ DO NOT reuse the old session!\n'))
-      return // Don't reconnect
+      console.error(chalk.red('\n❌ LOGGED OUT! Generate NEW session ID\n'))
+      return
     }
     
     if (code === DisconnectReason.badSession) {
-      console.error(chalk.red('\n❌ BAD SESSION!'))
-      console.error(chalk.red('🔑 Your session ID is corrupted or invalid'))
-      console.error(chalk.red('💡 Solution: Generate a NEW session ID'))
-      console.error(chalk.red('📱 Remove old devices from WhatsApp first\n'))
-      return // Don't reconnect
+      console.error(chalk.red('\n❌ BAD SESSION! Generate NEW session ID\n'))
+      return
     }
 
     if (code === DisconnectReason.connectionReplaced) {
-      console.error(chalk.red('\n❌ CONNECTION REPLACED!'))
-      console.error(chalk.red('⚠️ Same session is being used elsewhere'))
-      console.error(chalk.red('💡 Only use one session per deployment\n'))
-      return // Don't reconnect
+      console.error(chalk.red('\n❌ CONNECTION REPLACED!\n'))
+      return
     }
     
     if (code === DisconnectReason.restartRequired) {
-      console.log(chalk.yellow('🔄 Restart required... Reconnecting in 3s'))
+      console.log(chalk.yellow('🔄 Restart in 3s'))
       if (reconnectTimeout) clearTimeout(reconnectTimeout)
       reconnectTimeout = setTimeout(async () => {
         await global.reloadHandler(true)
@@ -552,21 +505,20 @@ async function connectionUpdate(update) {
       reconnectAttempts++
       if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
         const backoff = 3000 * reconnectAttempts
-        console.log(chalk.yellow(`🔄 Reconnecting... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) in ${backoff/1000}s`))
+        console.log(chalk.yellow(`🔄 Reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${backoff/1000}s`))
         if (reconnectTimeout) clearTimeout(reconnectTimeout)
         reconnectTimeout = setTimeout(async () => {
           await global.reloadHandler(true)
         }, backoff)
         return
       } else {
-        console.error(chalk.red('\n❌ Max reconnection attempts reached'))
-        console.error(chalk.red('💡 If this persists, generate a NEW session ID\n'))
+        console.error(chalk.red('\n❌ Max reconnects reached\n'))
         return
       }
     }
 
     if (code === DisconnectReason.timedOut) {
-      console.log(chalk.yellow('⏱️ Connection timed out. Reconnecting in 2s...'))
+      console.log(chalk.yellow('⏱️ Timeout. Reconnect in 2s'))
       if (reconnectTimeout) clearTimeout(reconnectTimeout)
       reconnectTimeout = setTimeout(async () => {
         await global.reloadHandler(true)
@@ -574,33 +526,21 @@ async function connectionUpdate(update) {
       return
     }
 
-    // For 403/401 or unknown errors - likely bad session
     if (code === 401 || code === 403 || !code) {
-      console.error(chalk.red('\n❌ AUTHENTICATION FAILED!'))
-      console.error(chalk.red('🔑 Session is invalid, expired, or revoked'))
-      console.error(chalk.red('💡 Generate a NEW session ID'))
-      console.error(chalk.red('📱 Steps:'))
-      console.error(chalk.red('   1. Open WhatsApp → Settings → Linked Devices'))
-      console.error(chalk.red('   2. Remove ALL old bot connections'))
-      console.error(chalk.red('   3. Generate fresh session ID'))
-      console.error(chalk.red('   4. Update SESSION_ID variable'))
-      console.error(chalk.red('   5. Restart bot\n'))
-      return // Don't reconnect
+      console.error(chalk.red('\n❌ AUTH FAILED! Generate NEW session ID\n'))
+      return
     }
 
-    console.error(chalk.yellow(`⚠️ Unexpected disconnect (code: ${code})`))
+    console.error(chalk.yellow(`⚠️ Unexpected disconnect: ${code}`))
   }
 }
 
 process.on('uncaughtException', (error) => {
-  console.error(chalk.red('❌ Uncaught Exception:'), error.message)
-  if (process.env.NODE_ENV !== 'production') {
-    console.error(error.stack)
-  }
+  console.error(chalk.red('❌ Exception:'), error.message)
 })
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error(chalk.red('❌ Unhandled Rejection:'), reason)
+process.on('unhandledRejection', (reason) => {
+  console.error(chalk.red('❌ Rejection:'), reason)
 })
 
 let isInit = true
@@ -616,15 +556,11 @@ global.reloadHandler = async function (restatConn) {
   
   if (restatConn) {
     const oldChats = global.conn.chats
-    try {
-      global.conn.ws.close()
-    } catch {}
+    try { global.conn.ws.close() } catch {}
     
     conn.ev.removeAllListeners()
     
-    global.conn = makeWASocket(connectionOptions, {
-      chats: oldChats,
-    })
+    global.conn = makeWASocket(connectionOptions, { chats: oldChats })
     isInit = true
   }
   
@@ -639,18 +575,18 @@ global.reloadHandler = async function (restatConn) {
     conn.ev.off('creds.update', conn.credsUpdate)
   }
 
-  conn.welcome = `🦄✨ Welcome @user!\n🎉 You've entered *@group*! Get ready for the magic!\n📜 Check the group scroll: @desc`
-  conn.bye = `💨 @user has left the realm.\n👋 May the unicorns guide you!`
-  conn.spromote = `🛡️✨ *@user* has been crowned as *Admin*!\nUnicorn power granted! 🦄`
-  conn.sdemote = `⚔️ *@user* has stepped down from the admin throne.`
-  conn.sDesc = `📝✨ Group prophecy updated:\n@desc`
-  conn.sSubject = `🔮✨ The group's new identity is:\n@group`
-  conn.sIcon = `🖼️✨ A fresh new sigil (icon) has been placed! 🦄`
-  conn.sRevoke = `🔗✨ New portal opened:\n@revoke`
-  conn.sAnnounceOn = `🚪✨ The gates are *CLOSED*!\nOnly the guardians (admins) may speak.`
-  conn.sAnnounceOff = `🎊✨ The gates are *OPEN*!\nLet the magic flow from everyone!`
-  conn.sRestrictOn = `🛠️✨ Only unicorn masters (admins) can edit the group scroll now.`
-  conn.sRestrictOff = `🛠️✨ All members may now shape the group destiny!`
+  conn.welcome = `🦄✨ Welcome @user to *@group*!`
+  conn.bye = `💨 @user left`
+  conn.spromote = `🛡️ *@user* is now Admin!`
+  conn.sdemote = `⚔️ *@user* demoted`
+  conn.sDesc = `📝 Desc: @desc`
+  conn.sSubject = `🔮 Name: @group`
+  conn.sIcon = `🖼️ New icon!`
+  conn.sRevoke = `🔗 Link: @revoke`
+  conn.sAnnounceOn = `🚪 CLOSED - Admins only`
+  conn.sAnnounceOff = `🎊 OPEN - Everyone can speak`
+  conn.sRestrictOn = `🛠️ Admins only edit`
+  conn.sRestrictOff = `🛠️ All can edit`
 
   conn.handler = handler.handler.bind(global.conn)
   conn.pollUpdate = handler.pollUpdate.bind(global.conn)
@@ -690,32 +626,30 @@ async function filesInit() {
   }
 }
 
-filesInit()
-  .then(_ => Object.keys(global.plugins))
-  .catch(console.error)
+filesInit().then(_ => Object.keys(global.plugins)).catch(console.error)
 
 let pluginWatcher
 global.reload = async (_ev, filename) => {
   if (pluginFilter(filename)) {
     const dir = global.__filename(join(pluginFolder, filename), true)
     if (filename in global.plugins) {
-      if (existsSync(dir)) conn.logger.info(`\n🦄 Updated plugin - '${filename}'`)
+      if (existsSync(dir)) conn.logger.info(`\n🦄 Updated: '${filename}'`)
       else {
-        conn.logger.warn(`\n🦄 Deleted plugin - '${filename}'`)
+        conn.logger.warn(`\n🦄 Deleted: '${filename}'`)
         return delete global.plugins[filename]
       }
-    } else conn.logger.info(`\n🦄 New plugin - '${filename}'`)
+    } else conn.logger.info(`\n🦄 New: '${filename}'`)
     const err = syntaxerror(readFileSync(dir), filename, {
       sourceType: 'module',
       allowAwaitOutsideFunction: true,
     })
-    if (err) conn.logger.error(`\n🦄 Syntax error while loading '${filename}'\n${format(err)}`)
+    if (err) conn.logger.error(`\n🦄 Syntax error: '${filename}'\n${format(err)}`)
     else {
       try {
         const module = await import(`${global.__filename(dir)}?update=${Date.now()}`)
         global.plugins[filename] = module.default || module
       } catch (e) {
-        conn.logger.error(`\n🦄 Error require plugin '${filename}\n${format(e)}'`)
+        conn.logger.error(`\n🦄 Error: '${filename}\n${format(e)}'`)
       } finally {
         global.plugins = Object.fromEntries(
           Object.entries(global.plugins).sort(([a], [b]) => a.localeCompare(b))
@@ -755,15 +689,15 @@ let sessionCleanupInterval
 async function saafsafai() {
   if (global.stopped === 'close' || !conn || !conn.user) return
   clearsession()
-  console.log(chalk.cyanBright('♻️ Unicorn session pre-keys cleared'))
+  console.log(chalk.cyanBright('♻️ Session cleaned'))
 }
 
-sessionCleanupInterval = setInterval(saafsafai, 10 * 60 * 1000)
+sessionCleanupInterval = setInterval(saafsafai, 600000)
 
 _quickTest().catch(console.error)
 
 async function gracefulShutdown() {
-  console.log('\n🦄 Shutting down gracefully...')
+  console.log('\n🦄 Shutting down...')
   
   if (storeInterval) clearInterval(storeInterval)
   if (sessionCleanupInterval) clearInterval(sessionCleanupInterval)
@@ -773,16 +707,14 @@ async function gracefulShutdown() {
   if (rl) rl.close()
   
   if (global.conn?.ws) {
-    try {
-      global.conn.ws.close()
-    } catch (e) {}
+    try { global.conn.ws.close() } catch (e) {}
   }
   
   if (global.conn?.ev) {
     global.conn.ev.removeAllListeners()
   }
   
-  console.log('✅ Cleanup complete')
+  console.log('✅ Cleanup done')
   process.exit(0)
 }
 
