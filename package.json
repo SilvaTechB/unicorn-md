@@ -1,7 +1,7 @@
 {
     "name": "unicorn-md",
     "version": "3.0.0",
-    "description": "Advanced WhatsApp",
+    "description": "Advanced WhatsApp Bot",
     "main": "unicorn-md.js",
     "type": "module",
     "directories": {
@@ -17,15 +17,9 @@
         "test": "node unicornmd.js"
     },
     "keywords": [
-        "termux-whatsapp-bot",
         "whatsapp-bot",
-        "whatsapp",
-        "js-whatsapp",
-        "whatsapp",
         "unicorn-bot",
-        "unicorn-bot-md",
         "multi-device",
-        "MD",
         "baileys-md"
     ],
     "homepage": "https://github.com/Sylivanu/unicorn-md",
@@ -47,7 +41,7 @@
         "@shineiichijo/marika": "^2.0.6",
         "@StarlightsTeam/Scraper": "github:StarlightsTeam/StarlightsTeam-Scraper",
         "@vitalets/google-translate-api": "^9.2.0",
-        "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "@whiskeysockets/baileys": "^6.7.7",
         "@SumiFX/Scraper": "github:SumiFX/SumiFX-Scraper",
         "@hapi/boom": "^10.0.0",
         "@xct007/frieren-scraper": "*",
